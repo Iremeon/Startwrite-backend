@@ -1,0 +1,194 @@
+// Startwrite — Prisma schema
+// Database: PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ──────────────────────────────────────────────
+// Enums
+// ──────────────────────────────────────────────
+
+enum AuthProvider {
+  local
+  google
+}
+
+enum UserRole {
+  user
+  admin
+}
+
+enum TemplateClass {
+  A
+  B
+  C
+}
+
+enum WalletTransactionType {
+  TOP_UP
+  DOWNLOAD_DEDUCTION
+}
+
+// ──────────────────────────────────────────────
+// Users & Auth
+// ──────────────────────────────────────────────
+
+// Represents either an individual OR an organization account — the same
+// table, same login mechanics either way. `tinNumber` presence is what
+// distinguishes them: provided = organization (skips email verification),
+// absent = individual (must verify email).
+model User {
+  id              String       @id @default(uuid())
+  name            String       @map("name") // person's full name OR organization name
+  email           String       @unique
+  passwordHash    String?      @map("password_hash") // null if Google-only
+  phoneNumber     String?      @map("phone_number")
+  tinNumber       String?      @unique @map("tin_number") // 9-digit RRA format, schema-validated only
+  authProvider    AuthProvider @default(local) @map("auth_provider")
+  role            UserRole     @default(user)
+  walletBalance   Decimal      @default(3.00) @db.Decimal(10, 2) @map("wallet_balance")
+  isActive        Boolean      @default(true) @map("is_active")
+  isEmailVerified Boolean      @default(false) @map("is_email_verified")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  oauthAccounts     UserOAuthAccount[]
+  walletTransactions WalletTransaction[]
+  uploadedTemplates Template[]          @relation("UploadedBy")
+
+  @@map("users")
+}
+
+// Supports adding more providers later without altering `users`
+model UserOAuthAccount {
+  id             String       @id @default(uuid())
+  userId         String       @map("user_id")
+  provider       AuthProvider
+  providerUserId String       @map("provider_user_id") // e.g. Google's `sub`
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerUserId])
+  @@map("user_oauth_accounts")
+}
+
+// ──────────────────────────────────────────────
+// Catalog
+// ──────────────────────────────────────────────
+
+model Category {
+  id           String   @id @default(uuid())
+  name         String
+  slug         String   @unique
+  description  String?
+  iconUrl      String?  @map("icon_url")
+  displayOrder Int      @default(0) @map("display_order")
+  isActive     Boolean  @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  subcategories Subcategory[]
+
+  @@map("categories")
+}
+
+model Subcategory {
+  id           String   @id @default(uuid())
+  categoryId   String   @map("category_id")
+  name         String
+  slug         String
+  displayOrder Int      @default(0) @map("display_order")
+  isActive     Boolean  @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  category  Category   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  templates Template[]
+
+  @@unique([categoryId, slug])
+  @@map("subcategories")
+}
+
+// No template is ever free. Every template belongs to a pricing class
+// (A/B/C) whose CURRENT price is looked up from PricingTier at download
+// time — the price isn't stored per-template, so adjusting a class's price
+// instantly applies to every template in that class.
+model Template {
+  id              String        @id @default(uuid())
+  subcategoryId   String        @map("subcategory_id")
+  title           String
+  slug            String        @unique
+  description     String?
+  fileUrl         String        @map("file_url") // Cloudinary URL — the download target
+  previewImageUrl String?       @map("preview_image_url")
+  fileType        String        @map("file_type") // docx, xlsx, pdf, pptx
+  templateClass   TemplateClass @map("template_class")
+  downloadCount   Int           @default(0) @map("download_count")
+  uploadedById    String?       @map("uploaded_by")
+  isActive        Boolean       @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  subcategory Subcategory @relation(fields: [subcategoryId], references: [id])
+  uploadedBy  User?       @relation("UploadedBy", fields: [uploadedById], references: [id])
+
+  @@map("templates")
+}
+
+// ──────────────────────────────────────────────
+// Wallet / Credits
+// ──────────────────────────────────────────────
+
+// The current price for each class. Admin-adjustable later without
+// touching any template row or running a migration.
+model PricingTier {
+  templateClass TemplateClass @id @map("template_class")
+  price         Decimal       @db.Decimal(10, 2)
+
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("pricing_tiers")
+}
+
+// Fixed top-up amounts offered at checkout (e.g. $5 / $10 / $20).
+model WalletPackage {
+  id       String  @id @default(uuid())
+  label    String // e.g. "Starter"
+  amount   Decimal @db.Decimal(10, 2)
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("wallet_packages")
+}
+
+// Full audit ledger — every top-up and every download deduction. The ONLY
+// place allowed to change User.walletBalance is the code path that also
+// writes one of these rows, inside the same transaction.
+model WalletTransaction {
+  id            String                @id @default(uuid())
+  userId        String                @map("user_id")
+  type          WalletTransactionType
+  amount        Decimal               @db.Decimal(10, 2) // always positive; `type` gives direction
+  balanceAfter  Decimal               @db.Decimal(10, 2) @map("balance_after")
+  templateId    String?               @map("template_id") // set for DOWNLOAD_DEDUCTION
+  stripeSessionId       String?       @map("stripe_session_id") // set for TOP_UP
+  stripePaymentIntentId String?       @map("stripe_payment_intent_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("wallet_transactions")
+}

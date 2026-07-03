@@ -1,5 +1,29 @@
 import cloudinary from '../config/cloudinary';
 import { UploadApiResponse } from 'cloudinary';
+import { ApiError } from './ApiError';
+
+const ALLOWED_EXTENSIONS = ['docx', 'xlsx', 'pdf', 'pptx'];
+
+const ALLOWED_MIME_TYPES = [
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.ms-excel',
+  'application/pdf',
+];
+
+const MAGIC_BYTES: Record<string, number[][]> = {
+  pdf: [[0x25, 0x50, 0x44, 0x46]],
+  docx: [[0x50, 0x4b, 0x03, 0x04]],
+  xlsx: [[0x50, 0x4b, 0x03, 0x04]],
+  pptx: [[0x50, 0x4b, 0x03, 0x04]],
+};
+
+const validateMagicBytes = (buffer: Buffer, ext: string): boolean => {
+  const signatures = MAGIC_BYTES[ext];
+  if (!signatures) return true;
+  return signatures.some(sig => sig.every((byte, i) => buffer[i] === byte));
+};
 
 interface UploadResult {
   url: string;
@@ -7,19 +31,41 @@ interface UploadResult {
   bytes: number;
 }
 
-/**
- * Streams an in-memory file buffer (from multer's memoryStorage) to Cloudinary.
- * Used by the admin template upload-proxy endpoint (POST /admin/templates/:id/upload).
- */
 export const uploadBufferToCloudinary = (
   buffer: Buffer,
-  options: { folder?: string; originalFilename?: string } = {},
+  options: { folder?: string; originalFilename?: string; mimetype?: string } = {},
 ): Promise<UploadResult> => {
+  const ext = options.originalFilename?.split('.').pop()?.toLowerCase() ?? '';
+
+  if (!ALLOWED_EXTENSIONS.includes(ext)) {
+    throw new ApiError(
+      400,
+      'INVALID_FILE_TYPE',
+      `Only ${ALLOWED_EXTENSIONS.join(', ')} files are accepted. Received: .${ext || 'unknown'}`,
+    );
+  }
+
+  if (options.mimetype && !ALLOWED_MIME_TYPES.includes(options.mimetype)) {
+    throw new ApiError(
+      400,
+      'INVALID_FILE_TYPE',
+      `File MIME type "${options.mimetype}" is not accepted for document uploads.`,
+    );
+  }
+
+  if (!validateMagicBytes(buffer, ext)) {
+    throw new ApiError(
+      400,
+      'INVALID_FILE_CONTENT',
+      `The file content does not match the expected .${ext} format. Make sure the file is a real ${ext.toUpperCase()} document.`,
+    );
+  }
+
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
       {
         folder: options.folder || 'startwrite/templates',
-        resource_type: 'auto', // allows docx/xlsx/pdf/pptx, not just images
+        resource_type: 'auto',
         use_filename: true,
         unique_filename: true,
         filename_override: options.originalFilename,
@@ -30,7 +76,7 @@ export const uploadBufferToCloudinary = (
         }
         resolve({
           url: result.secure_url,
-          fileType: result.format,
+          fileType: ext,
           bytes: result.bytes,
         });
       },
@@ -39,7 +85,6 @@ export const uploadBufferToCloudinary = (
   });
 };
 
-/** Uploads a preview/thumbnail image specifically (forces image resource type). */
 export const uploadImageToCloudinary = (
   buffer: Buffer,
   folder = 'startwrite/previews',

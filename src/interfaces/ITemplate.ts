@@ -1,6 +1,7 @@
 export type TemplateClass = 'A' | 'B' | 'C';
 export type TemplateFileType = 'docx' | 'xlsx' | 'pdf' | 'pptx';
 
+
 export interface IListTemplatesQuery {
   category?: string;
   subcategory?: string;

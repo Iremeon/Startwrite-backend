@@ -9,3 +9,8 @@ export interface UserProfileDto {
   isEmailVerified: boolean;
   createdAt: Date;
 }
+
+export interface IUpdateProfile {
+  name?: string;
+  phoneNumber?: string | null;
+}

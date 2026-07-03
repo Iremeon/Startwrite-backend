@@ -20,7 +20,7 @@ const router = Router();
  * @swagger
  * /auth/register:
  *   post:
- *     summary: Register a new account (individual or organization). Providing a tinNumber registers an organization (auto-verified); omitting it registers an individual (requires email verification).
+ *     summary: Register an organization account. tinNumber (Rwanda RRA 9-digit format) is optional — providing it identifies the account as an organization. A verification email is always sent regardless.
  *     tags: [Auth]
  *     requestBody:
  *       required: true
@@ -30,14 +30,14 @@ const router = Router();
  *             type: object
  *             required: [name, email, password]
  *             properties:
- *               name: { type: string, example: "Jean Doe or Computer Rwanda Ltd" }
+ *               name: { type: string, example: "Computer Rwanda Ltd" }
  *               email: { type: string, format: email }
  *               password: { type: string, format: password, minLength: 8 }
  *               phoneNumber: { type: string }
- *               tinNumber: { type: string, example: "102134442", description: "Exactly 9 digits (Rwanda RRA format). Providing this registers an organization account and skips email verification." }
+ *               tinNumber: { type: string, example: "102134442", description: "Exactly 9 digits (Rwanda RRA format). Optional — marks the account as an organization." }
  *     responses:
  *       201:
- *         description: Registration successful — individuals get a verification email, organizations can log in immediately
+ *         description: Registration successful — verification email sent, check inbox before logging in
  *       409:
  *         description: Email or TIN already in use
  */

@@ -57,13 +57,6 @@ export const registerUser = async (input: IRegisterUser) => {
 
   const passwordHash = await hashPassword(input.password);
 
-  // TIN provided → organization → trusted, auto-verified, no email step.
-  // No TIN → individual → must verify their email (existing flow).
-  const isOrganization = Boolean(input.tinNumber);
-
-  // If a Google-only account already exists for this email, link it
-  // (per the "one user, multiple login methods" design) rather than
-  // creating a duplicate row.
   const user = existing
     ? await prisma.user.update({
         where: { id: existing.id },
@@ -72,7 +65,6 @@ export const registerUser = async (input: IRegisterUser) => {
           name: input.name,
           phoneNumber: input.phoneNumber,
           tinNumber: input.tinNumber,
-          isEmailVerified: existing.isEmailVerified || isOrganization,
         },
       })
     : await prisma.user.create({
@@ -83,27 +75,24 @@ export const registerUser = async (input: IRegisterUser) => {
           phoneNumber: input.phoneNumber,
           tinNumber: input.tinNumber,
           authProvider: 'local',
-          isEmailVerified: isOrganization,
+          isEmailVerified: false,
         },
       });
 
-  // Only individuals (no TIN) need the verification email — organizations
-  // are trusted via their TIN and can log in immediately.
-  if (!isOrganization) {
-    const verificationToken = generateSecureToken();
-    await redis.set(
-      redisKeys.emailVerification(verificationToken),
-      user.id,
-      'EX',
-      EMAIL_VERIFICATION_TTL,
-    );
+  // Always send verification email — no exceptions regardless of TIN.
+  const verificationToken = generateSecureToken();
+  await redis.set(
+    redisKeys.emailVerification(verificationToken),
+    user.id,
+    'EX',
+    EMAIL_VERIFICATION_TTL,
+  );
 
-    appEvents.emit(AppEvent.USER_REGISTERED, {
-      email: user.email,
-      name: user.name,
-      verificationToken,
-    });
-  }
+  appEvents.emit(AppEvent.USER_REGISTERED, {
+    email: user.email,
+    name: user.name,
+    verificationToken,
+  });
 
   return {
     id: user.id,

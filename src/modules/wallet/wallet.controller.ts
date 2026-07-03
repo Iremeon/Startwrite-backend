@@ -38,6 +38,22 @@ export const createTopUp = async (req: IRequestUser, res: Response, next: NextFu
   }
 };
 
+export const createDirectPay = async (req: IRequestUser, res: Response, next: NextFunction) => {
+  try {
+    const { templateId } = req.params;
+    const result = await walletService.createDirectPayCheckout(req.user!.id, templateId);
+    return ResponseService({
+      data: result,
+      status: 200,
+      success: true,
+      message: 'Direct payment checkout session created. Complete payment to download.',
+      res,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 /**
  * Stripe webhook — must use the RAW request body for signature verification.
  * The route in wallet.routes.ts wires express.raw() specifically for this path,

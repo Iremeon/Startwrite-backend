@@ -4,6 +4,7 @@ import { getPaginationParams, buildPaginationMeta } from '../../utils/pagination
 import { uploadBufferToCloudinary, uploadImageToCloudinary } from '../../utils/uploadHelper';
 import { IListTemplatesQuery, ICreateTemplate, IUpdateTemplate } from '../../interfaces/ITemplate';
 import { Prisma } from '@prisma/client';
+import redis, { redisKeys } from '../../config/redis';
 
 interface ListFilters extends IListTemplatesQuery {
   [key: string]: unknown;
@@ -69,6 +70,29 @@ export const downloadTemplate = async (userId: string, templateId: string) => {
     throw new ApiError(404, 'TEMPLATE_NOT_FOUND', 'Template not found.');
   }
 
+  // Check for a one-time direct-purchase token (granted by the Stripe webhook
+  // after a pay-direct checkout). If present, skip the wallet-balance check
+  // entirely and consume the token immediately so it can't be reused.
+  const directTokenKey = redisKeys.directPurchaseToken(userId, templateId);
+  const directToken = await redis.get(directTokenKey);
+
+  if (directToken) {
+    await redis.del(directTokenKey);
+    await prisma.template.update({
+      where: { id: templateId },
+      data: { downloadCount: { increment: 1 } },
+    });
+    return {
+      fileUrl: template.fileUrl,
+      fileType: template.fileType,
+      title: template.title,
+      amountCharged: 0,
+      paymentMethod: 'direct',
+      newBalance: null,
+    };
+  }
+
+  // No direct token — fall through to the wallet-balance path.
   const pricing = await prisma.pricingTier.findUnique({
     where: { templateClass: template.templateClass },
   });
@@ -128,6 +152,7 @@ export const downloadTemplate = async (userId: string, templateId: string) => {
     fileType: result.fileType,
     title: result.title,
     amountCharged: price,
+    paymentMethod: 'wallet',
     newBalance,
   };
 };
@@ -158,6 +183,7 @@ export const createTemplateWithUpload = async (
   uploadedById: string,
   fileBuffer: Buffer,
   originalFilename: string,
+  mimetype: string,
   previewBuffer?: Buffer,
 ) => {
   const existing = await prisma.template.findUnique({ where: { slug: input.slug } });
@@ -165,7 +191,7 @@ export const createTemplateWithUpload = async (
     throw new ApiError(409, 'SLUG_IN_USE', 'A template with this slug already exists.');
   }
 
-  const fileResult = await uploadBufferToCloudinary(fileBuffer, { originalFilename });
+  const fileResult = await uploadBufferToCloudinary(fileBuffer, { originalFilename, mimetype });
 
   let previewImageUrl: string | undefined;
   if (previewBuffer) {

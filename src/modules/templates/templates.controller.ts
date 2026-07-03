@@ -23,7 +23,6 @@ export const getTemplate = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
-// The gatekeeping endpoint — checks + deducts wallet balance atomically.
 export const downloadTemplate = async (req: IRequestUser, res: Response, next: NextFunction) => {
   try {
     const result = await templatesService.downloadTemplate(req.user!.id, req.params.id);
@@ -39,7 +38,6 @@ export const downloadTemplate = async (req: IRequestUser, res: Response, next: N
   }
 };
 
-// Merged upload+create: admin sends the file AND metadata in one multipart request.
 export const createTemplate = async (req: IRequestUser, res: Response, next: NextFunction) => {
   try {
     const files = req.files as { [field: string]: Express.Multer.File[] } | undefined;
@@ -61,7 +59,8 @@ export const createTemplate = async (req: IRequestUser, res: Response, next: Nex
       req.user!.id,
       file.buffer,
       file.originalname,
-      preview?.buffer,
+      file.mimetype,       // ← new: passed to upload helper for MIME + magic byte validation
+      preview?.buffer,     // ← now correctly in 6th position
     );
 
     return ResponseService({

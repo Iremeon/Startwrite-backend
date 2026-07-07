@@ -177,14 +177,13 @@ model WalletPackage {
 // place allowed to change User.walletBalance is the code path that also
 // writes one of these rows, inside the same transaction.
 model WalletTransaction {
-  id            String                @id @default(uuid())
-  userId        String                @map("user_id")
-  type          WalletTransactionType
-  amount        Decimal               @db.Decimal(10, 2) // always positive; `type` gives direction
-  balanceAfter  Decimal               @db.Decimal(10, 2) @map("balance_after")
-  templateId    String?               @map("template_id") // set for DOWNLOAD_DEDUCTION
-  stripeSessionId       String?       @map("stripe_session_id") // set for TOP_UP
-  stripePaymentIntentId String?       @map("stripe_payment_intent_id")
+  id           String                @id @default(uuid())
+  userId       String                @map("user_id")
+  type         WalletTransactionType
+  amount       Decimal               @db.Decimal(10, 2)
+  balanceAfter Decimal               @db.Decimal(10, 2) @map("balance_after")
+  templateId   String?               @map("template_id")
+  paymentRef   String?               @map("payment_ref")
 
   createdAt DateTime @default(now()) @map("created_at")
 

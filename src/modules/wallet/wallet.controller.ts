@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { ResponseService } from '../../utils/response';
 import { IRequestUser } from '../../middlewares/authenticate';
 import * as walletService from './wallet.service';
-import stripe from '../../config/stripe';
+import { PaypackWebhookPayload } from '../../interfaces/IWallet';
 
 export const listPackages = async (_req: Request, res: Response, next: NextFunction) => {
   try {
@@ -24,13 +24,13 @@ export const getMyWallet = async (req: IRequestUser, res: Response, next: NextFu
 
 export const createTopUp = async (req: IRequestUser, res: Response, next: NextFunction) => {
   try {
-    const { packageId } = req.body;
-    const result = await walletService.createTopUpCheckout(req.user!.id, packageId);
+    const { packageId, phoneNumber } = req.body;
+    const result = await walletService.initiateTopUp(req.user!.id, packageId, phoneNumber);
     return ResponseService({
       data: result,
       status: 200,
       success: true,
-      message: 'Checkout session created',
+      message: result.message,
       res,
     });
   } catch (error) {
@@ -41,12 +41,13 @@ export const createTopUp = async (req: IRequestUser, res: Response, next: NextFu
 export const createDirectPay = async (req: IRequestUser, res: Response, next: NextFunction) => {
   try {
     const { templateId } = req.params;
-    const result = await walletService.createDirectPayCheckout(req.user!.id, templateId);
+    const { phoneNumber } = req.body;
+    const result = await walletService.initiateDirectPay(req.user!.id, templateId, phoneNumber);
     return ResponseService({
       data: result,
       status: 200,
       success: true,
-      message: 'Direct payment checkout session created. Complete payment to download.',
+      message: result.message,
       res,
     });
   } catch (error) {
@@ -55,28 +56,20 @@ export const createDirectPay = async (req: IRequestUser, res: Response, next: Ne
 };
 
 /**
- * Stripe webhook — must use the RAW request body for signature verification.
- * The route in wallet.routes.ts wires express.raw() specifically for this path,
- * bypassing the global JSON body parser (mirrored in app.ts).
+ * Paypack webhook — called by Paypack on every transaction:processed event.
+ * No signature verification (Paypack doesn't provide one) — security is
+ * handled by re-verifying the transaction ref directly with Paypack's API
+ * inside the service before crediting any balance.
+ * Always returns 200 to prevent Paypack retries, even on internal errors.
  */
 export const handleWebhook = async (req: Request, res: Response) => {
-  const signature = req.headers['stripe-signature'] as string;
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET as string;
-
-  let event;
   try {
-    event = stripe.webhooks.constructEvent(req.body, signature, webhookSecret);
-  } catch (err) {
-    const message = (err as Error).message;
-    console.error('Stripe webhook signature verification failed:', message);
-    return res.status(400).send(`Webhook Error: ${message}`);
-  }
-
-  try {
-    await walletService.handleStripeWebhookEvent(event);
+    const payload = req.body as PaypackWebhookPayload;
+    await walletService.handlePaypackWebhook(payload);
     return res.status(200).json({ received: true });
   } catch (err) {
-    console.error('Error processing Stripe webhook event:', err);
+    console.error('Error processing Paypack webhook:', err);
+    // Still return 200 — internal errors shouldn't cause Paypack retries.
     return res.status(200).json({ received: true, processedWithError: true });
   }
 };

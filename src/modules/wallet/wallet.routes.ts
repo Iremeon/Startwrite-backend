@@ -3,7 +3,9 @@ import * as walletController from './wallet.controller';
 import { ValidationMiddleware } from '../../middlewares/validate';
 import { authMiddleware } from '../../middlewares/authenticate';
 import { checkoutRateLimiter } from '../../middlewares/rateLimiter';
-import { topUpSchema } from './wallet.validation';
+import { topUpSchema, directPaySchema } from './wallet.validation';
+
+export const packagesRouter = Router();
 
 /**
  * @swagger
@@ -13,9 +15,8 @@ import { topUpSchema } from './wallet.validation';
  *     tags: [Wallet]
  *     responses:
  *       200:
- *         description: List of packages
+ *         description: List of packages with amounts
  */
-export const packagesRouter = Router();
 packagesRouter.get('/', walletController.listPackages);
 
 export const walletRouter = Router();
@@ -37,7 +38,7 @@ walletRouter.get('/me', authMiddleware, walletController.getMyWallet);
  * @swagger
  * /wallet/topup:
  *   post:
- *     summary: Top up wallet with a fixed package via Stripe Checkout
+ *     summary: Top up wallet via mobile money (MTN/Airtel). User receives a USSD push to approve on their phone.
  *     tags: [Wallet]
  *     security: [{ bearerAuth: [] }]
  *     requestBody:
@@ -46,12 +47,13 @@ walletRouter.get('/me', authMiddleware, walletController.getMyWallet);
  *         application/json:
  *           schema:
  *             type: object
- *             required: [packageId]
+ *             required: [packageId, phoneNumber]
  *             properties:
  *               packageId: { type: string, format: uuid }
+ *               phoneNumber: { type: string, example: "0781234567" }
  *     responses:
  *       200:
- *         description: Returns a Stripe-hosted checkoutUrl to redirect to
+ *         description: Payment initiated — user must approve on their phone
  *       404:
  *         description: Package not found
  */
@@ -67,7 +69,7 @@ walletRouter.post(
  * @swagger
  * /wallet/pay-direct/{templateId}:
  *   post:
- *     summary: Pay directly for one specific template via Stripe Checkout — no wallet balance needed. On payment success, the Stripe webhook grants a one-time download token (15 min TTL) for that template.
+ *     summary: Pay directly for one template via mobile money. No wallet balance needed. User receives a USSD push — after approval, retry the download endpoint.
  *     tags: [Wallet]
  *     security: [{ bearerAuth: [] }]
  *     parameters:
@@ -75,9 +77,18 @@ walletRouter.post(
  *         name: templateId
  *         required: true
  *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [phoneNumber]
+ *             properties:
+ *               phoneNumber: { type: string, example: "0781234567" }
  *     responses:
  *       200:
- *         description: Returns a Stripe-hosted checkoutUrl, the template title, and the price
+ *         description: Payment initiated — approve on phone, then retry the download
  *       404:
  *         description: Template not found
  */
@@ -85,9 +96,19 @@ walletRouter.post(
   '/pay-direct/:templateId',
   authMiddleware,
   checkoutRateLimiter,
+  ValidationMiddleware({ type: 'body', schema: directPaySchema }),
   walletController.createDirectPay,
 );
 
-// NOTE: the webhook route is mounted separately in app.ts, BEFORE the global
-// express.json() middleware, because Stripe signature verification requires
-// the raw, unparsed request body.
+/**
+ * @swagger
+ * /wallet/webhook:
+ *   post:
+ *     summary: Paypack webhook — called by Paypack when a mobile money transaction is processed (do not call manually)
+ *     tags: [Wallet]
+ *     responses:
+ *       200:
+ *         description: Acknowledged
+ */
+export const webhookRouter = Router();
+webhookRouter.post('/', walletController.handleWebhook);

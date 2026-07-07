@@ -13,8 +13,7 @@ import authRoutes from './modules/auth/auth.routes';
 import userRoutes, { adminUsersRouter } from './modules/users/users.routes';
 import * as categoryRoutes from './modules/categories/categories.routes';
 import * as templateRoutes from './modules/templates/templates.routes';
-import { packagesRouter, walletRouter } from './modules/wallet/wallet.routes';
-import { handleWebhook } from './modules/wallet/wallet.controller';
+import { packagesRouter, walletRouter, webhookRouter } from './modules/wallet/wallet.routes';
 import adminRoutes from './modules/admin/admin.routes';
 
 const app: Application = express();
@@ -25,11 +24,7 @@ registerMailerListeners();
 app.use(helmet());
 app.use(cors());
 app.use(morgan(process.env.NODE_ENV === 'development' ? 'dev' : 'combined'));
-
-app.post(`${API_PREFIX}/wallet/webhook`, express.raw({ type: 'application/json' }), handleWebhook);
-
 app.use(express.json());
-
 app.use(API_PREFIX, globalRateLimiter);
 
 app.get('/health', (_req, res) => res.status(200).json({ status: 'ok' }));
@@ -51,6 +46,7 @@ app.use(`${API_PREFIX}/templates`, templateRoutes.publicRouter);
 app.use(`${API_PREFIX}/admin/templates`, templateRoutes.adminRouter);
 
 app.use(`${API_PREFIX}/wallet/packages`, packagesRouter);
+app.use(`${API_PREFIX}/wallet/webhook`, webhookRouter);
 app.use(`${API_PREFIX}/wallet`, walletRouter);
 
 app.use(`${API_PREFIX}/admin`, adminRoutes);

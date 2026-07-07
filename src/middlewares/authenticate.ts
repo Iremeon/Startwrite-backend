@@ -2,13 +2,19 @@ import { Request, Response, NextFunction } from 'express';
 import { ResponseService } from '../utils/response';
 import { verifyToken, AppJwtPayload } from '../utils/helper';
 
-export interface IRequestUser extends Request {
-  user?: AppJwtPayload;
-  token?: string;
+declare global {
+  namespace Express {
+    interface Request {
+      user?: AppJwtPayload;
+      token?: string;
+    }
+  }
 }
 
+export type IRequestUser = Request;
+
 // Authentication middleware — verifies the JWT and attaches req.user
-export const authMiddleware = async (req: IRequestUser, res: Response, next: NextFunction) => {
+export const authMiddleware = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) {
@@ -53,7 +59,7 @@ export const authMiddleware = async (req: IRequestUser, res: Response, next: Nex
  * just attaches req.user if a valid token is present.
  */
 export const optionalAuthMiddleware = async (
-  req: IRequestUser,
+  req: Request,
   _res: Response,
   next: NextFunction,
 ) => {

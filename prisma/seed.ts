@@ -34,37 +34,41 @@ async function main() {
     );
   }
 
-  // ── Pricing tiers — Class A/B/C, admin-adjustable later without touching templates ──
+    // ── Pricing tiers — Class A/B/C, admin-adjustable later without touching templates ──
   await prisma.pricingTier.upsert({
     where: { templateClass: 'A' },
-    update: {},
-    create: { templateClass: 'A', price: 3.0 },
+    update: { price: 400 },
+    create: { templateClass: 'A', price: 400 },
   });
   await prisma.pricingTier.upsert({
     where: { templateClass: 'B' },
-    update: {},
-    create: { templateClass: 'B', price: 2.0 },
+    update: { price: 300 },
+    create: { templateClass: 'B', price: 300 },
   });
   await prisma.pricingTier.upsert({
     where: { templateClass: 'C' },
-    update: {},
-    create: { templateClass: 'C', price: 1.0 },
+    update: { price: 200 },
+    create: { templateClass: 'C', price: 200 },
   });
-  console.log('Seeded pricing tiers: A=$3.00, B=$2.00, C=$1.00');
+  console.log('Seeded pricing tiers: A=400 RWF, B=300 RWF, C=200 RWF');
+
 
   // ── Wallet top-up packages — fixed amounts, scalable later ──
   const packages = [
-    { label: 'Starter', amount: 5.0 },
-    { label: 'Growth', amount: 10.0 },
-    { label: 'Pro', amount: 20.0 },
+    { label: 'Starter', amount: 2000 },
+    { label: 'Growth', amount: 5000 },
+    { label: 'Pro', amount: 10000 },
   ];
   for (const pkg of packages) {
     const existing = await prisma.walletPackage.findFirst({ where: { label: pkg.label } });
-    if (!existing) {
+    if (existing) {
+      await prisma.walletPackage.update({ where: { id: existing.id }, data: { amount: pkg.amount } });
+    } else {
       await prisma.walletPackage.create({ data: pkg });
     }
   }
-  console.log('Seeded wallet top-up packages: Starter $5, Growth $10, Pro $20');
+  console.log('Seeded wallet top-up packages: Starter 2000 RWF, Growth 5000 RWF, Pro 10000 RWF');
+
 
   // ── Categories + Subcategories ──
   const categoriesData = [

@@ -37,20 +37,20 @@ async function main() {
     // ── Pricing tiers — Class A/B/C, admin-adjustable later without touching templates ──
   await prisma.pricingTier.upsert({
     where: { templateClass: 'A' },
-    update: { price: 400 },
-    create: { templateClass: 'A', price: 400 },
+    update: { price: 300 },
+    create: { templateClass: 'A', price: 300 },
   });
   await prisma.pricingTier.upsert({
     where: { templateClass: 'B' },
-    update: { price: 300 },
-    create: { templateClass: 'B', price: 300 },
+    update: { price: 200 },
+    create: { templateClass: 'B', price: 200 },
   });
   await prisma.pricingTier.upsert({
     where: { templateClass: 'C' },
-    update: { price: 200 },
-    create: { templateClass: 'C', price: 200 },
+    update: { price: 100 },
+    create: { templateClass: 'C', price: 100 },
   });
-  console.log('Seeded pricing tiers: A=400 RWF, B=300 RWF, C=200 RWF');
+  console.log('Seeded pricing tiers: A=300 RWF, B=200 RWF, C=100 RWF');
 
 
   // ── Wallet top-up packages — fixed amounts, scalable later ──

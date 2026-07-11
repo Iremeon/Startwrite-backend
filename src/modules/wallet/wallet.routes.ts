@@ -50,7 +50,7 @@ walletRouter.get('/me', authMiddleware, walletController.getMyWallet);
  *             required: [packageId, phoneNumber]
  *             properties:
  *               packageId: { type: string, format: uuid }
- *               phoneNumber: { type: string, example: "0781234567" }
+ *               phoneNumber: { type: string, example: "0789092847" }
  *     responses:
  *       200:
  *         description: Payment initiated — user must approve on their phone
@@ -85,7 +85,7 @@ walletRouter.post(
  *             type: object
  *             required: [phoneNumber]
  *             properties:
- *               phoneNumber: { type: string, example: "0781234567" }
+ *               phoneNumber: { type: string, example: "0789092847" }
  *     responses:
  *       200:
  *         description: Payment initiated — approve on phone, then retry the download

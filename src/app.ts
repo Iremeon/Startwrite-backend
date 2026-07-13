@@ -26,6 +26,9 @@ app.use(cors());
 app.use(morgan(process.env.NODE_ENV === 'development' ? 'dev' : 'combined'));
 app.use(express.json());
 app.use(API_PREFIX, globalRateLimiter);
+// Trust Render's proxy — required for express-rate-limit to correctly
+// identify client IPs behind Render's load balancer.
+app.set('trust proxy', 1);
 
 app.get('/health', (_req, res) => res.status(200).json({ status: 'ok' }));
 

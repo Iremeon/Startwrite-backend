@@ -9,13 +9,13 @@ export enum AppEvent {
 export interface UserRegisteredPayload {
   email: string;
   name: string;
-  verificationToken: string;
+  code: string; // 6-digit OTP
 }
 
 export interface PasswordResetRequestedPayload {
   email: string;
   name: string;
-  resetToken: string;
+  code: string; // 6-digit OTP
 }
 
 export interface WalletToppedUpPayload {
@@ -25,6 +25,4 @@ export interface WalletToppedUpPayload {
   newBalance: number | string;
 }
 
-// Single shared emitter for the whole app. Listeners are registered once,
-// in src/utils/mailer.ts, when the app boots.
 export const appEvents = new EventEmitter();

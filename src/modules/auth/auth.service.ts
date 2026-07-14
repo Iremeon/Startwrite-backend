@@ -8,24 +8,27 @@ import {
   signAccessToken,
   signRefreshToken,
   verifyRefreshToken,
-  generateSecureToken,
+  generateOtpCode,
   AppJwtPayload,
 } from '../../utils/helper';
 import { verifyGoogleIdToken } from '../../config/passport';
 import { IRegisterUser } from '../../interfaces/IAuth';
 import crypto from 'crypto';
 
-const EMAIL_VERIFICATION_TTL = Number(process.env.EMAIL_VERIFICATION_TOKEN_TTL_SECONDS) || 86400;
-const PASSWORD_RESET_TTL = Number(process.env.PASSWORD_RESET_TOKEN_TTL_SECONDS) || 3600;
-const REFRESH_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60; // matches JWT_REFRESH_EXPIRES_IN default
+const EMAIL_VERIFICATION_TTL = Number(process.env.OTP_TTL_SECONDS) || 600; // 10 minutes
+const PASSWORD_RESET_TTL = Number(process.env.OTP_TTL_SECONDS) || 600;     // 10 minutes
+const REFRESH_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
 
-const buildJwtPayload = (user: { id: string; email: string; role: string }): AppJwtPayload => ({
+const buildJwtPayload = (user: {
+  id: string;
+  email: string;
+  role: string;
+}): AppJwtPayload => ({
   id: user.id,
   email: user.email,
   role: user.role as 'user' | 'admin',
 });
 
-/** Issues access + refresh tokens, and stores the refresh token in Redis (revocable on logout). */
 const issueTokenPair = async (user: { id: string; email: string; role: string }) => {
   const accessToken = signAccessToken(buildJwtPayload(user));
   const refreshToken = signRefreshToken({ id: user.id });
@@ -60,12 +63,7 @@ export const registerUser = async (input: IRegisterUser) => {
   const user = existing
     ? await prisma.user.update({
         where: { id: existing.id },
-        data: {
-          passwordHash,
-          name: input.name,
-          phoneNumber: input.phoneNumber,
-          tinNumber: input.tinNumber,
-        },
+        data: { passwordHash, name: input.name, phoneNumber: input.phoneNumber, tinNumber: input.tinNumber },
       })
     : await prisma.user.create({
         data: {
@@ -79,11 +77,11 @@ export const registerUser = async (input: IRegisterUser) => {
         },
       });
 
-  // Always send verification email — no exceptions regardless of TIN.
-  const verificationToken = generateSecureToken();
+  // Always issue a 6-digit OTP — no exceptions.
+  const code = generateOtpCode();
   await redis.set(
-    redisKeys.emailVerification(verificationToken),
-    user.id,
+    redisKeys.emailVerificationCode(user.email),
+    code,
     'EX',
     EMAIL_VERIFICATION_TTL,
   );
@@ -91,7 +89,7 @@ export const registerUser = async (input: IRegisterUser) => {
   appEvents.emit(AppEvent.USER_REGISTERED, {
     email: user.email,
     name: user.name,
-    verificationToken,
+    code,
   });
 
   return {
@@ -118,12 +116,11 @@ export const loginUser = async (email: string, password: string) => {
     throw new ApiError(403, 'ACCOUNT_DISABLED', 'This account has been disabled.');
   }
 
-  // Hard block per the agreed verification flow — no login until verified.
   if (!user.isEmailVerified) {
     throw new ApiError(
       403,
       'EMAIL_NOT_VERIFIED',
-      'Please verify your email before logging in. Check your inbox for the verification link.',
+      'Please verify your email before logging in. Check your inbox for the 6-digit code.',
     );
   }
 
@@ -137,7 +134,6 @@ export const loginOrRegisterWithGoogle = async (idToken: string) => {
   let user = await prisma.user.findUnique({ where: { email: profile.email } });
 
   if (!user) {
-    // New user via Google — auto-verified, no password set.
     user = await prisma.user.create({
       data: {
         name: profile.fullName,
@@ -147,14 +143,12 @@ export const loginOrRegisterWithGoogle = async (idToken: string) => {
       },
     });
   } else if (!user.isEmailVerified) {
-    // Existing local account, not yet verified — Google's verification covers it.
     user = await prisma.user.update({
       where: { id: user.id },
       data: { isEmailVerified: true },
     });
   }
 
-  // Link the OAuth identity if this is the first time signing in via Google.
   await prisma.userOAuthAccount.upsert({
     where: { provider_providerUserId: { provider: 'google', providerUserId: profile.googleId } },
     update: {},
@@ -183,7 +177,6 @@ export const refreshAccessToken = async (refreshToken: string) => {
     throw new ApiError(401, 'INVALID_REFRESH_TOKEN', 'Refresh token is invalid or revoked.');
   }
 
-  // Rotate: revoke the old refresh token, issue a new pair.
   await redis.del(redisKeys.refreshToken(decoded.id, tokenId));
   return issueTokenPair(user);
 };
@@ -193,60 +186,90 @@ export const logoutUser = async (userId: string, refreshToken: string) => {
   await redis.del(redisKeys.refreshToken(userId, tokenId));
 };
 
-export const verifyEmail = async (token: string) => {
-  const userId = await redis.get(redisKeys.emailVerification(token));
-  if (!userId) {
+export const verifyEmail = async (email: string, code: string) => {
+  const stored = await redis.get(redisKeys.emailVerificationCode(email));
+  if (!stored || stored !== code) {
     throw new ApiError(
       400,
-      'INVALID_OR_EXPIRED_TOKEN',
-      'This verification link is invalid or has expired.',
+      'INVALID_OR_EXPIRED_CODE',
+      'The verification code is incorrect or has expired. Request a new one.',
     );
   }
 
-  await prisma.user.update({ where: { id: userId }, data: { isEmailVerified: true } });
-  await redis.del(redisKeys.emailVerification(token));
+  await prisma.user.update({ where: { email }, data: { isEmailVerified: true } });
+  await redis.del(redisKeys.emailVerificationCode(email));
+};
+
+export const resendVerificationCode = async (email: string) => {
+  const user = await prisma.user.findUnique({ where: { email } });
+  if (!user) return; // Don't leak whether the email exists
+
+  if (user.isEmailVerified) {
+    throw new ApiError(400, 'ALREADY_VERIFIED', 'This email is already verified.');
+  }
+
+  const code = generateOtpCode();
+  await redis.set(
+    redisKeys.emailVerificationCode(email),
+    code,
+    'EX',
+    EMAIL_VERIFICATION_TTL,
+  );
+
+  appEvents.emit(AppEvent.USER_REGISTERED, {
+    email: user.email,
+    name: user.name,
+    code,
+  });
 };
 
 export const requestPasswordReset = async (email: string) => {
   const user = await prisma.user.findUnique({ where: { email } });
-  // Don't leak whether the email exists — always respond success-shaped from the controller.
-  if (!user) return;
+  if (!user) return; // Don't leak whether the email exists
 
-  const resetToken = generateSecureToken();
-  await redis.set(redisKeys.passwordReset(resetToken), user.id, 'EX', PASSWORD_RESET_TTL);
+  const code = generateOtpCode();
+  await redis.set(
+    redisKeys.passwordResetCode(email),
+    code,
+    'EX',
+    PASSWORD_RESET_TTL,
+  );
 
   appEvents.emit(AppEvent.PASSWORD_RESET_REQUESTED, {
     email: user.email,
     name: user.name,
-    resetToken,
+    code,
   });
 };
 
-export const verifyResetToken = async (token: string): Promise<void> => {
-  const userId = await redis.get(redisKeys.passwordReset(token));
-  if (!userId) {
+export const verifyResetCode = async (email: string, code: string): Promise<void> => {
+  const stored = await redis.get(redisKeys.passwordResetCode(email));
+  if (!stored || stored !== code) {
     throw new ApiError(
       400,
-      'INVALID_OR_EXPIRED_TOKEN',
-      'This reset link is invalid or has expired.',
+      'INVALID_OR_EXPIRED_CODE',
+      'The reset code is incorrect or has expired. Request a new one.',
     );
   }
-  // Intentionally does NOT delete the token here — only confirms it's still
-  // valid so the frontend can show the "set new password" form. The token
-  // is only consumed when resetPassword() below actually changes the password.
+  // Intentionally does NOT delete — only verify-reset-code checks without consuming.
 };
 
-export const resetPassword = async (token: string, newPassword: string) => {
-  const userId = await redis.get(redisKeys.passwordReset(token));
-  if (!userId) {
+export const resetPassword = async (email: string, code: string, newPassword: string) => {
+  const stored = await redis.get(redisKeys.passwordResetCode(email));
+  if (!stored || stored !== code) {
     throw new ApiError(
       400,
-      'INVALID_OR_EXPIRED_TOKEN',
-      'This reset link is invalid or has expired.',
+      'INVALID_OR_EXPIRED_CODE',
+      'The reset code is incorrect or has expired. Request a new one.',
     );
+  }
+
+  const user = await prisma.user.findUnique({ where: { email } });
+  if (!user) {
+    throw new ApiError(404, 'USER_NOT_FOUND', 'User not found.');
   }
 
   const passwordHash = await hashPassword(newPassword);
-  await prisma.user.update({ where: { id: userId }, data: { passwordHash } });
-  await redis.del(redisKeys.passwordReset(token));
+  await prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
+  await redis.del(redisKeys.passwordResetCode(email));
 };

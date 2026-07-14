@@ -3,7 +3,7 @@ export interface IRegisterUser {
   email: string;
   password: string;
   phoneNumber?: string;
-  tinNumber?: string; // presence = organization (skips email verification)
+  tinNumber?: string;
 }
 
 export interface ILoginUser {
@@ -19,8 +19,10 @@ export interface IRefreshToken {
   refreshToken: string;
 }
 
+// Code-based verification — user types the 6-digit code from their email.
 export interface IVerifyEmail {
-  token: string;
+  email: string;
+  code: string;
 }
 
 export interface IForgotPassword {
@@ -28,11 +30,13 @@ export interface IForgotPassword {
 }
 
 export interface IVerifyResetToken {
-  token: string;
+  email: string;
+  code: string;
 }
 
 export interface IResetPassword {
-  token: string;
+  email: string;
+  code: string;
   newPassword: string;
 }
 

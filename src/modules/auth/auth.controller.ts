@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { ResponseService } from '../../utils/response';
-import * as authService from './auth.service';
 import { IRequestUser } from '../../middlewares/authenticate';
+import * as authService from './auth.service';
 
 export const register = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -10,7 +10,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       data: user,
       status: 201,
       success: true,
-      message: 'Registration successful. Please check your email to verify your account.',
+      message: 'Registration successful. A 6-digit verification code has been sent to your email.',
       res,
     });
   } catch (error) {
@@ -47,8 +47,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
 export const googleLogin = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { idToken } = req.body;
-    const { user, accessToken, refreshToken } =
-      await authService.loginOrRegisterWithGoogle(idToken);
+    const { user, accessToken, refreshToken } = await authService.loginOrRegisterWithGoogle(idToken);
     return ResponseService({
       data: {
         accessToken,
@@ -75,13 +74,7 @@ export const refresh = async (req: Request, res: Response, next: NextFunction) =
   try {
     const { refreshToken } = req.body;
     const tokens = await authService.refreshAccessToken(refreshToken);
-    return ResponseService({
-      data: tokens,
-      status: 200,
-      success: true,
-      message: 'Token refreshed',
-      res,
-    });
+    return ResponseService({ data: tokens, status: 200, success: true, message: 'Token refreshed', res });
   } catch (error) {
     next(error);
   }
@@ -91,13 +84,7 @@ export const logout = async (req: IRequestUser, res: Response, next: NextFunctio
   try {
     const { refreshToken } = req.body;
     await authService.logoutUser(req.user!.id, refreshToken);
-    return ResponseService({
-      data: null,
-      status: 200,
-      success: true,
-      message: 'Logged out successfully',
-      res,
-    });
+    return ResponseService({ data: null, status: 200, success: true, message: 'Logged out successfully', res });
   } catch (error) {
     next(error);
   }
@@ -105,8 +92,8 @@ export const logout = async (req: IRequestUser, res: Response, next: NextFunctio
 
 export const verifyEmail = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { token } = req.body;
-    await authService.verifyEmail(token);
+    const { email, code } = req.body;
+    await authService.verifyEmail(email, code);
     return ResponseService({
       data: null,
       status: 200,
@@ -119,16 +106,15 @@ export const verifyEmail = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
-export const forgotPassword = async (req: Request, res: Response, next: NextFunction) => {
+export const resendVerificationCode = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email } = req.body;
-    await authService.requestPasswordReset(email);
-    // Always respond the same way, whether or not the email exists.
+    await authService.resendVerificationCode(email);
     return ResponseService({
       data: null,
       status: 200,
       success: true,
-      message: 'If an account exists for this email, a reset link has been sent.',
+      message: 'A new verification code has been sent to your email.',
       res,
     });
   } catch (error) {
@@ -136,15 +122,31 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
   }
 };
 
-export const verifyResetToken = async (req: Request, res: Response, next: NextFunction) => {
+export const forgotPassword = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { token } = req.body;
-    await authService.verifyResetToken(token);
+    const { email } = req.body;
+    await authService.requestPasswordReset(email);
     return ResponseService({
       data: null,
       status: 200,
       success: true,
-      message: 'Reset token is valid. You can now set a new password.',
+      message: 'If an account exists for this email, a 6-digit reset code has been sent.',
+      res,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const verifyResetCode = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { email, code } = req.body;
+    await authService.verifyResetCode(email, code);
+    return ResponseService({
+      data: null,
+      status: 200,
+      success: true,
+      message: 'Code is valid. You can now set a new password.',
       res,
     });
   } catch (error) {
@@ -154,8 +156,8 @@ export const verifyResetToken = async (req: Request, res: Response, next: NextFu
 
 export const resetPassword = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { token, newPassword } = req.body;
-    await authService.resetPassword(token, newPassword);
+    const { email, code, newPassword } = req.body;
+    await authService.resetPassword(email, code, newPassword);
     return ResponseService({
       data: null,
       status: 200,

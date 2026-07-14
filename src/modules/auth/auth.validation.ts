@@ -5,8 +5,6 @@ export const registerSchema = Joi.object({
   email: Joi.string().email().required(),
   password: Joi.string().min(8).max(128).required(),
   phoneNumber: Joi.string().optional().allow(''),
-  // Rwanda RRA TIN format: exactly 9 digits, numeric only. Schema-validated
-  // shape only — no live lookup against RRA's database.
   tinNumber: Joi.string()
     .pattern(/^\d{9}$/)
     .messages({ 'string.pattern.base': 'tinNumber must be exactly 9 digits (Rwanda RRA format)' })
@@ -26,19 +24,31 @@ export const refreshSchema = Joi.object({
   refreshToken: Joi.string().required(),
 });
 
+// Code-based email verification
 export const verifyEmailSchema = Joi.object({
-  token: Joi.string().required(),
+  email: Joi.string().email().required(),
+  code: Joi.string().length(6).pattern(/^\d{6}$/).required().messages({
+    'string.length': 'Verification code must be exactly 6 digits',
+    'string.pattern.base': 'Verification code must be numeric',
+  }),
 });
 
 export const forgotPasswordSchema = Joi.object({
   email: Joi.string().email().required(),
 });
 
-export const verifyResetTokenSchema = Joi.object({
-  token: Joi.string().required(),
+// Verify the reset code without consuming it
+export const verifyResetCodeSchema = Joi.object({
+  email: Joi.string().email().required(),
+  code: Joi.string().length(6).pattern(/^\d{6}$/).required().messages({
+    'string.length': 'Reset code must be exactly 6 digits',
+    'string.pattern.base': 'Reset code must be numeric',
+  }),
 });
 
+// Consume the code and set the new password
 export const resetPasswordSchema = Joi.object({
-  token: Joi.string().required(),
+  email: Joi.string().email().required(),
+  code: Joi.string().length(6).pattern(/^\d{6}$/).required(),
   newPassword: Joi.string().min(8).max(128).required(),
 });

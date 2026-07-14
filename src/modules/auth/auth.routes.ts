@@ -10,9 +10,10 @@ import {
   refreshSchema,
   verifyEmailSchema,
   forgotPasswordSchema,
-  verifyResetTokenSchema,
+  verifyResetCodeSchema,
   resetPasswordSchema,
 } from './auth.validation';
+import Joi from 'joi';
 
 const router = Router();
 
@@ -20,7 +21,7 @@ const router = Router();
  * @swagger
  * /auth/register:
  *   post:
- *     summary: Register an organization account. tinNumber (Rwanda RRA 9-digit format) is optional — providing it identifies the account as an organization. A verification email is always sent regardless.
+ *     summary: Register an organization account. A 6-digit verification code is always sent to the email provided.
  *     tags: [Auth]
  *     requestBody:
  *       required: true
@@ -34,10 +35,10 @@ const router = Router();
  *               email: { type: string, format: email }
  *               password: { type: string, format: password, minLength: 8 }
  *               phoneNumber: { type: string }
- *               tinNumber: { type: string, example: "102134442", description: "Exactly 9 digits (Rwanda RRA format). Optional — marks the account as an organization." }
+ *               tinNumber: { type: string, example: "102134442" }
  *     responses:
  *       201:
- *         description: Registration successful — verification email sent, check inbox before logging in
+ *         description: Registration successful — check email for 6-digit verification code
  *       409:
  *         description: Email or TIN already in use
  */
@@ -63,14 +64,14 @@ router.post(
  *             required: [email, password]
  *             properties:
  *               email: { type: string, format: email }
- *               password: { type: string, format: password }
+ *               password: { type: string }
  *     responses:
  *       200:
- *         description: Login successful — returns accessToken, refreshToken, and user
+ *         description: Login successful
  *       401:
  *         description: Invalid credentials
  *       403:
- *         description: Account disabled or email not verified
+ *         description: Email not verified or account disabled
  */
 router.post(
   '/login',
@@ -96,7 +97,7 @@ router.post(
  *               idToken: { type: string }
  *     responses:
  *       200:
- *         description: Login successful — returns accessToken, refreshToken, and user
+ *         description: Login successful
  */
 router.post(
   '/google/token',
@@ -136,7 +137,7 @@ router.post(
  * @swagger
  * /auth/logout:
  *   post:
- *     summary: Revoke a refresh token (log out)
+ *     summary: Revoke refresh token (log out)
  *     tags: [Auth]
  *     security: [{ bearerAuth: [] }]
  *     requestBody:
@@ -158,7 +159,7 @@ router.post('/logout', authMiddleware, authController.logout);
  * @swagger
  * /auth/verify-email:
  *   post:
- *     summary: Verify an email using the token sent after registration
+ *     summary: Verify email using the 6-digit code sent after registration
  *     tags: [Auth]
  *     requestBody:
  *       required: true
@@ -166,14 +167,15 @@ router.post('/logout', authMiddleware, authController.logout);
  *         application/json:
  *           schema:
  *             type: object
- *             required: [token]
+ *             required: [email, code]
  *             properties:
- *               token: { type: string }
+ *               email: { type: string, format: email }
+ *               code: { type: string, example: "847291", description: "6-digit code from email" }
  *     responses:
  *       200:
- *         description: Email verified successfully
+ *         description: Email verified — can now log in
  *       400:
- *         description: Token invalid or expired
+ *         description: Code incorrect or expired
  */
 router.post(
   '/verify-email',
@@ -183,9 +185,9 @@ router.post(
 
 /**
  * @swagger
- * /auth/forgot-password:
+ * /auth/resend-verification:
  *   post:
- *     summary: Request a password reset link
+ *     summary: Resend a new 6-digit verification code to an unverified email
  *     tags: [Auth]
  *     requestBody:
  *       required: true
@@ -198,7 +200,36 @@ router.post(
  *               email: { type: string, format: email }
  *     responses:
  *       200:
- *         description: Reset link sent if the account exists (response is always success-shaped)
+ *         description: New code sent (response is always success-shaped to avoid leaking email existence)
+ */
+router.post(
+  '/resend-verification',
+  authRateLimiter,
+  ValidationMiddleware({
+    type: 'body',
+    schema: Joi.object({ email: Joi.string().email().required() }),
+  }),
+  authController.resendVerificationCode,
+);
+
+/**
+ * @swagger
+ * /auth/forgot-password:
+ *   post:
+ *     summary: Request a 6-digit password reset code via email
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email]
+ *             properties:
+ *               email: { type: string, format: email }
+ *     responses:
+ *       200:
+ *         description: Reset code sent if account exists (always success-shaped)
  */
 router.post(
   '/forgot-password',
@@ -209,9 +240,9 @@ router.post(
 
 /**
  * @swagger
- * /auth/verify-reset-token:
+ * /auth/verify-reset-code:
  *   post:
- *     summary: Check whether a password reset token is still valid (does NOT consume the token — call this before showing the "set new password" form)
+ *     summary: Verify a password reset code without consuming it — call before showing the new password form
  *     tags: [Auth]
  *     requestBody:
  *       required: true
@@ -219,26 +250,27 @@ router.post(
  *         application/json:
  *           schema:
  *             type: object
- *             required: [token]
+ *             required: [email, code]
  *             properties:
- *               token: { type: string }
+ *               email: { type: string, format: email }
+ *               code: { type: string, example: "391847" }
  *     responses:
  *       200:
- *         description: Token is valid
+ *         description: Code is valid
  *       400:
- *         description: Token invalid or expired
+ *         description: Code incorrect or expired
  */
 router.post(
-  '/verify-reset-token',
-  ValidationMiddleware({ type: 'body', schema: verifyResetTokenSchema }),
-  authController.verifyResetToken,
+  '/verify-reset-code',
+  ValidationMiddleware({ type: 'body', schema: verifyResetCodeSchema }),
+  authController.verifyResetCode,
 );
 
 /**
  * @swagger
  * /auth/reset-password:
  *   post:
- *     summary: Set a new password using a reset token (consumes the token)
+ *     summary: Set a new password using the 6-digit reset code (consumes the code)
  *     tags: [Auth]
  *     requestBody:
  *       required: true
@@ -246,15 +278,16 @@ router.post(
  *         application/json:
  *           schema:
  *             type: object
- *             required: [token, newPassword]
+ *             required: [email, code, newPassword]
  *             properties:
- *               token: { type: string }
+ *               email: { type: string, format: email }
+ *               code: { type: string, example: "391847" }
  *               newPassword: { type: string, format: password, minLength: 8 }
  *     responses:
  *       200:
  *         description: Password reset successfully
  *       400:
- *         description: Token invalid or expired
+ *         description: Code incorrect or expired
  */
 router.post(
   '/reset-password',
